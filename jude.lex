@@ -12,7 +12,7 @@ letter             [a-zA-Z]
 initial            {letter}
 subsequent         {letter}|{digit}
 digit              [0-9]
-operator           [\+\*\-\\]
+operator           [\+\*\-\/]
 id                 ({letter}|{operator})({letter}|{digit})*
 number             {digit}+
 dot                \.
@@ -29,4 +29,3 @@ false              #f
 {true}       { yylval = boolean_to_expr(1); return BOOLEAN; }
 {false}      { yylval = boolean_to_expr(0); return BOOLEAN; }
 {dot}        { return DOT; }
-

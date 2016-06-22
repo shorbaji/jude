@@ -6,9 +6,7 @@
 #include "jude.tab.h"
 
 // TODO
-// - clean up interface
 // - implement macros
-// - implement minus, times and divide
 // - implement a garbage collector
 // - implement continuations
 
@@ -341,22 +339,92 @@ struct expr* _plus_fn(struct expr *e)
   return number_to_expr(s);
 }
 
-struct proc* make_plus_proc() {
-  struct proc* plus_proc = malloc(sizeof(struct proc));
-  plus_proc->fn = _plus_fn;
-  plus_proc->code = NULL;
-  plus_proc->variables = NULL;
+struct expr* _minus_fn(struct expr *e)
+{
+  char s[200];
+  int sum=0;
+  struct expr* v;
 
-  return plus_proc;
+  if (e!=NULL) {
+    if (car(e)->type != TYPE_NUMBER)
+	return error_to_expr("not a number");
+    else {
+      sum += car(e)->value.atom.number;
+      e = cdr(e);
+    }
+
+    while (e!=NULL) {
+      if (car(e)->type != TYPE_NUMBER) {
+	return error_to_expr("not a number");
+      } else {
+	sum -= car(e)->value.atom.number;
+	e = cdr(e);
+      }
+    }
+  }
+
+  sprintf(s, "%d", sum);
+  return number_to_expr(s);
 }
 
+struct expr* _times_fn(struct expr *e)
+{
+  char s[200];
+  int product=1;
+  struct expr* v;
+
+  while (e!=NULL) {
+    if (car(e)->type != TYPE_NUMBER) {
+      return error_to_expr("not a number");
+    } else {
+      product *= car(e)->value.atom.number;
+      e = cdr(e);
+    }
+  }
+
+  sprintf(s, "%d", product);
+  return number_to_expr(s);
+}
+
+struct expr* _divide_fn(struct expr *e)
+{
+  char s[200];
+  int product=1;
+  struct expr* v;
+
+  if ((e!=NULL) &&
+      (car(e)!=NULL) &&
+      (cdr(e)!=NULL) &&
+      (cadr(e) != NULL) &&
+      (TYPE_NUMBER == car(e)->type) &&
+      (TYPE_NUMBER == cadr(e)->type))
+    product = car(e)->value.atom.number/cadr(e)->value.atom.number;
+  else
+    return error_to_expr("not a number");
+
+  sprintf(s, "%d", product);
+  return number_to_expr(s);
+}
+
+struct proc* make_builtin_proc(struct expr* (* fn) (struct expr *e)) {
+  struct proc* proc = malloc(sizeof(struct proc));
+  proc->fn = fn;
+  proc->code = NULL;
+  proc->variables = NULL;
+
+  return proc;  
+}
+  
 // global environment
 
 struct env* make_global_env() {
   struct env* env = malloc(sizeof(struct env));
   env->parent = NULL;
 
-  env_add_symbol(env, symbol_to_expr("+"), proc_to_expr(make_plus_proc()));
+  env_add_symbol(env, symbol_to_expr("+"), proc_to_expr(make_builtin_proc(_plus_fn)));
+  env_add_symbol(env, symbol_to_expr("-"), proc_to_expr(make_builtin_proc(_minus_fn)));
+  env_add_symbol(env, symbol_to_expr("*"), proc_to_expr(make_builtin_proc(_times_fn)));
+  env_add_symbol(env, symbol_to_expr("/"), proc_to_expr(make_builtin_proc(_divide_fn)));
 
   return env;
 }
