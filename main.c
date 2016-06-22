@@ -102,7 +102,11 @@ struct expr* env_lookup(struct env* env, struct expr* symbol) {
   HASH_FIND_STR(env->hash, symbol->value.atom.symbol, e);
 
   if (e == NULL)
-    return error_to_expr("unknown symbol");
+    if (env->parent == NULL)
+      return error_to_expr("unknown symbol");
+    else
+      return env_lookup(env->parent, symbol);
+			
   else
     return e->value;
 }
@@ -247,9 +251,9 @@ struct expr* apply(struct proc* proc, struct expr* list) {
   if (is_error(list))
     return list;
   if (proc->fn!= NULL)
-    proc->fn(list);
+    return proc->fn(list);
   else
-    invoke(proc, list);
+    return invoke(proc, list);
 }
 
 struct expr* make_procedure(struct expr* e, struct env* parent) {
@@ -265,6 +269,8 @@ struct expr* make_procedure(struct expr* e, struct env* parent) {
 
 struct expr* eval(struct expr* e, struct env* env)
 {
+  printf("eval: ");
+  print(e);
   if (is_true (atom(e))) {
       if (e->type == TYPE_SYMBOL) {
 	struct expr* v = env_lookup(env, e);
