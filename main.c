@@ -6,12 +6,11 @@
 #include "jude.tab.h"
 
 // TODO
-// - backup
+// - clean up interface
 // - implement macros
 // - implement minus, times and divide
 // - implement a garbage collector
 // - implement continuations
-// - clean up interface
 
 // built-in types
 
@@ -211,6 +210,7 @@ struct expr* eval(struct expr*, struct env* env);
 
 struct expr* evlis(struct expr* e, struct env* env)
 {
+
   struct expr* v;
 
   if (e==NULL)
@@ -361,8 +361,13 @@ struct env* make_global_env() {
   return env;
 }
 
+void banner() {
+  printf("Jude Lisp v0.1\nCopyright 2016 Omar Shorbaji\n");
+
+}
 // REPL
 int main(int argc, char** argv) {
+  banner();
   struct env* global = make_global_env();
   while (1) {
     print(eval(read(), global));

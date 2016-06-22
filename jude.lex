@@ -21,9 +21,8 @@ false              #f
 
 %%
 
-
-ws           {}
-{number}     { yylval = number_to_expr(yytext); return NUMBER;}
+[ \t\n]+     {}
+{number}     { yylval = number_to_expr(yytext); return NUMBER; }
 \(           { return OPEN; }
 \)           { return CLOSE; }
 {id}         { yylval = symbol_to_expr(yytext); return SYMBOL; }
