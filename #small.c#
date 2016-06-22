@@ -1,0 +1,29 @@
+#include <stdio.h>
+#include "small.h"
+#include "small.tab.h"
+
+void print(struct cell* expr) {
+  if (expr->value.type == TYPE_NUM) {
+    printf("val: %d\n", expr->value.num);
+  } else if (expr->value.type == TYPE_SYMBOL) {
+    printf("sym: %s\n", expr->value.symbol);
+  }
+}
+
+struct cell* eval(YYSTYPE expr) {
+  return expr;
+}
+
+struct cell* read() {
+  yyparse();
+  return yylval;
+}
+
+int main(int argc, char** argv) {
+  while (1) {
+    print(eval(read()));
+  }
+}
+
+
+
