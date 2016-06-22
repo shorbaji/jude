@@ -27,7 +27,7 @@ struct expr {
 };
 
 struct proc {
-  struct env* env;
+  struct env* parent;
   struct expr* code;
   struct expr * variables;
   struct expr* (*fn) (struct expr* argv);

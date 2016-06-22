@@ -6,6 +6,7 @@
 #include "jude.tab.h"
 
 // TODO
+// - implement recursion
 // - implement macros
 // - implement a garbage collector
 // - implement continuations
@@ -71,7 +72,6 @@ int is_error(struct expr *e) {
 int is_pair(struct expr *e) {
   return e->type == TYPE_PAIR;
 }
-
 
 int is_true(struct expr *e) {
   if (e->type != TYPE_BOOLEAN)
@@ -229,9 +229,10 @@ struct expr* evlis(struct expr* e, struct env* env)
 
 struct expr* invoke(struct proc* p, struct expr* e) {
   struct expr* vars = p->variables;
+  struct env* env = make_env(p->parent); 
 
   while (vars != NULL) {
-    env_add_symbol(p->env, car(vars), car(e));
+    env_add_symbol(env, car(vars), car(e));
     vars = cdr(vars);
     e = cdr(e);
   }
@@ -239,7 +240,7 @@ struct expr* invoke(struct proc* p, struct expr* e) {
   struct expr* code = p->code;
   struct expr* result = NULL;
   while (code != NULL) {
-    result = eval(car(code), p->env);
+    result = eval(car(code), env);
     code = cdr(code);
   }
   return result;
@@ -260,54 +261,60 @@ struct expr* make_procedure(struct expr* e, struct env* parent) {
   proc->variables = car(e);
   proc->code = cdr(e);
   proc->fn = NULL;
-  proc->env = make_env(parent);
+  proc->parent = parent;
 
   return proc_to_expr(proc);
 }
 
 struct expr* eval(struct expr* e, struct env* env)
 {
-  printf("eval: ");
-  print(e);
+  //  printf("eval: ");
+  //  print(e);
+  struct expr* result;
+  
   if (is_true (atom(e))) {
       if (e->type == TYPE_SYMBOL) {
 	struct expr* v = env_lookup(env, e);
 	if (v==NULL)
 	  {
-	    return error_to_expr("symbol not found\n"); 
+	    result= error_to_expr("symbol not found\n"); 
 	  }
 	else
-	  return v;
+	  result = v;
       } else {
-	return e; // self quoting all
+	result = e; // self quoting all
       }
   } else {
-    if KEYWORD("cons")       return cons(eval(cadr(e), env), eval(caddr(e), env));
-    else if KEYWORD("car")   return car(eval(cadr(e), env));
-    else if KEYWORD("cdr")   return cdr(eval(cadr(e), env));
-    else if KEYWORD("atom")  return atom(eval(cadr(e), env));
-    else if KEYWORD("eq")    return eq(eval(cadr(e), env), eval(caddr(e), env));
-    else if KEYWORD("quote") return cadr(e);
+    if KEYWORD("cons")       result = cons(eval(cadr(e), env), eval(caddr(e), env));
+    else if KEYWORD("car")   result = car(eval(cadr(e), env));
+    else if KEYWORD("cdr")   result = cdr(eval(cadr(e), env));
+    else if KEYWORD("atom")  result = atom(eval(cadr(e), env));
+    else if KEYWORD("eq")    result = eq(eval(cadr(e), env), eval(caddr(e), env));
+    else if KEYWORD("quote") result = cadr(e);
     else if KEYWORD("if")  {
 	if (is_true(eval(cadr(e), env))) 
-	  return eval(caddr(e), env);
+	  result = eval(caddr(e), env);
 	else
-	  return eval(cadddr(e), env);
-    } else if KEYWORD("def") {
+	  result = eval(cadddr(e), env);
+    } else if KEYWORD("define") {
 	env_add_symbol(env, cadr(e), eval(caddr(e), env));
-	return e;
+	result = e;
     } else if KEYWORD("lambda") {
-	return make_procedure(cdr(e), env);
+	result = make_procedure(cdr(e), env);
     } else if KEYWORD("mac") {
-	return e;
+	result = e;
     } else {
       struct expr* v = eval(car(e), env);
       if (v->type != TYPE_PROCEDURE)
-	return error_to_expr("not a procedure. can't invoke");
+	result = error_to_expr("not a procedure. can't invoke");
       else
-	return apply(v->value.atom.procedure, evlis(cdr(e), env));
+	result = apply(v->value.atom.procedure, evlis(cdr(e), env));
     }
   }
+
+  //  printf("result: ");
+  //  print(result);
+  return result;
 }
 
 // read
