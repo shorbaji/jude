@@ -22,10 +22,10 @@ false              #f
 %%
 
 [ \t\n]+     {}
-{number}     { yylval = number_to_expr(yytext); return NUMBER; }
+{number}     { yylval = number_to_object(yytext); return NUMBER; }
 \(           { return OPEN; }
 \)           { return CLOSE; }
-{id}         { yylval = symbol_to_expr(yytext); return SYMBOL; }
-{true}       { yylval = boolean_to_expr(1); return BOOLEAN; }
-{false}      { yylval = boolean_to_expr(0); return BOOLEAN; }
+{id}         { yylval = symbol_to_object(yytext); return SYMBOL; }
+{true}       { yylval = boolean_to_object(1); return BOOLEAN; }
+{false}      { yylval = boolean_to_object(0); return BOOLEAN; }
 {dot}        { return DOT; }

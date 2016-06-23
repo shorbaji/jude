@@ -3,35 +3,50 @@
 
 #include "uthash.h"
 
-struct expr;
+struct object;
 
-struct cell {
-  struct expr* car;
-  struct expr* cdr;
+struct hash_entry {
+  char* key;
+  struct object* value;
+  UT_hash_handle hh;
+};
+
+struct env {
+  struct hash_entry* hash;
+  struct object* parent;
+};
+
+struct object* env_lookup(struct object *env, struct object* symbol);
+void env_add_symbol(struct object *env, struct object* symbol, struct object* value);
+struct object* make_env(struct object *parent);
+
+struct pair {
+  struct object* car;
+  struct object* cdr;
 };
 
 union value {
   int number;
-  char* symbol;
   int boolean;
+  char* symbol;
   char* error;
-  struct proc* procedure;
+  struct pair pair;
+  struct env env;
+  struct procedure *procedure;
 };
   
-struct expr {
+struct object {
   int type;
-  union {
-    struct cell pair;
-    union value atom;
-  } value;
+  union value value;
 };
 
-struct proc {
-  struct env* parent;
-  struct expr* code;
-  struct expr * variables;
-  struct expr* (*fn) (struct expr* argv);
+struct procedure {
+  struct object* parent;
+  struct object* code;
+  struct object* variables;
+  struct object* (*fn) (struct object* argv);
 };
+
 
 #define TYPE_NUMBER 1
 #define TYPE_SYMBOL 2
@@ -40,33 +55,23 @@ struct proc {
 #define TYPE_PAIR 8
 #define TYPE_ERROR 32
 
-extern struct expr * number_to_expr(char*);
-extern struct expr * symbol_to_expr(char*);
-extern struct expr * boolean_to_expr(int);
-extern struct expr * cons(struct expr*, struct expr*);
-extern struct expr * proc_to_expr(struct proc*);
+extern struct object * number_to_object(char *);
+extern struct object * symbol_to_object(char *);
+extern struct object * boolean_to_object(int);
+extern struct object * procedure_to_object(struct procedure *);
+extern struct object * error_to_object(char *);
+extern struct object * cons(struct object*, struct object *);
 
-struct entry {
-  char* symbol;
-  struct expr * value;
-  UT_hash_handle hh;
-};
+void print_datum(struct object *);
+void print(struct object *);
 
-struct env {
-  struct entry* hash;
-  struct env* parent;
-};
+struct object* car(struct object *);
+struct object* cdr(struct object *);
+struct object* cadr(struct object *);
+struct object* cddr(struct object *);
+struct object* caddr(struct object *);
 
-struct expr* env_lookup(struct env* env, struct expr* symbol);
-void env_add_symbol(struct env* env, struct expr* symbol, struct expr* value);
-struct env* make_env(struct env* parent);
 
-void print_datum(struct expr*);
-void print(struct expr*);
-
-struct expr* car(struct expr*);
-struct expr* cdr(struct expr*);
-struct expr* cadr(struct expr*);
-
+struct object* eval(struct object*, struct object *env);
 
 #endif
