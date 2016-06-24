@@ -7,10 +7,9 @@
 
 // TODO
 // - unquote, quasiquote, comma_at
-// - syntax for ' ` , ,@
 // - macros
 // - tail recursion
-// - continuations
+// - syntax for ' ` , ,@
 // - a garbage collector
 // - libraries
 
@@ -197,19 +196,18 @@ void env_add_symbol(struct object * env, struct object* symbol, struct object* v
   HASH_ADD_STR(env->value.env.hash, key, h_entry);
 }
 
-struct object* env_lookup(struct object* env, struct object* symbol) {
+struct object* env_lookup(struct object* env, struct object* symbol, struct object* k) {
   struct hash_entry *h_entry;
 
   HASH_FIND_STR(env->value.env.hash, symbol->value.symbol, h_entry);
 
   if (h_entry == NULL)
     if (env->value.env.parent == NULL)
-      return error_to_object("unknown symbol");
+      resume(k, error_to_object("unknown symbol"));
     else
-      return env_lookup(env->value.env.parent, symbol);
-			
+      env_lookup(env->value.env.parent, symbol, k);
   else
-    return h_entry->value;
+    resume(k, h_entry->value);
 }
 
 struct object *make_env(struct object* parent) {
@@ -267,36 +265,7 @@ void print(struct object* e) {
 
 // special forms
 
-struct object * lambda(struct object *vars, struct object* code, struct object* env) {
-  struct procedure* p = malloc(sizeof(struct procedure));
-
-  p->variables = vars;
-  p->code = code;
-  p->fn = NULL;
-  p->parent = env;
-
-  return procedure_to_object(p);
-}
-
-struct object * define(struct object *subject, struct object* object, struct object* env) {
-  if (TYPE_SYMBOL == subject->type) {
-    env_add_symbol(env, subject, eval(car(object), env));
-    return subject;
-  } else {
-    env_add_symbol(env, car(subject), lambda(cdr(subject), object, env));
-    return car(subject);
-  }
-}
-
 // built-in forms for eval: quote, if, atom, eq, cons, car, cdr
-
-struct object *quote(struct object *obj) {
-  return obj;
-}
-
-struct object * _if(struct object *e, struct object* env) {
-  is_true(eval(car(e), env)) ? eval(cadr(e), env) : eval(caddr(e), env);
-}
 
 struct object* atom(struct object *e)
 {
@@ -308,6 +277,7 @@ struct object* eq(struct object* a, struct object* b)
 {
   if (is_error(a)) return (a);
   if (is_error(b)) return (b);  
+
   return
     boolean_to_object((a->type == b->type) &&
 		    (((a->type == TYPE_NUMBER) && (a->value.number == b->value.number)) ||
@@ -336,120 +306,213 @@ struct object* cadr(struct object *e) { return car(cdr(e)); }
 struct object* caddr(struct object *e) { return car(cdr(cdr(e))); }
 struct object* cadddr(struct object *e) { return car(cdr(cdr(cdr(e)))); }
 
-struct object* evlis(struct object* e, struct object *env)
-{
-  struct object* v;
+// continuations
 
-  if (e==NULL)
-    return NULL;
-  else
-    {
-      if (is_error(e))
-	return e;
-      
-      if (is_true(atom(e))) {
-	return eval(e, env);
-      } else {
-	return cons(eval(car(e), env), evlis(cdr(e), env));
-      }
-    }
+struct object *continuation_to_object(struct continuation *k) {
+  struct object *obj = malloc(sizeof(struct object));
+  obj->type = TYPE_CONTINUATION;
+  obj->value.continuation = k;
+
+  return obj;
+}
+  
+struct object *make_continuation(int type,
+				 struct object *first,
+				 struct object *second,
+				 struct object *env,
+				 struct object *k)
+{
+  struct continuation *c = malloc(sizeof(struct continuation));
+
+  c->type = type;
+  c->first = first;
+  c->second = second;
+  c->env = env;
+  c->k = k;
+
+  return continuation_to_object(c);
 }
 
-// apply
+struct object *make_if_continuation(struct object *consequent, struct object *alternative, struct object *env, struct object *k)
+{
+  return make_continuation(CONT_IF, consequent, alternative, env, k);
+}
 
-struct object * invoke(struct object *obj, struct object *l) {
+struct object *make_add_symbol_continuation(struct object *subject, struct object *env, struct object *k)
+{
+  return make_continuation(CONT_ADD_SYMBOL, subject, NULL, env, k);
+}
+
+struct object *make_application_continuation(struct object *args, struct object *env, struct object *k)
+{
+  return make_continuation(CONT_APPLICATION, args, NULL, env, k);
+  
+}
+struct object *make_invoke_continuation(struct object* fn, struct object *env, struct object *k)
+{
+  return make_continuation(CONT_INVOKE, fn, NULL, env, k);
+}
+
+struct object *make_shift_continuation(struct object* remain, struct object* done, struct object *env, struct object *k)
+{
+  return make_continuation(CONT_SHIFT, remain, done, env, k);
+}
+
+struct object *make_rest_continuation(struct object* rest, struct object* env, struct object* k)
+{
+  return make_continuation(CONT_REST, rest, NULL, env, k);
+}
+
+struct object *make_built_in_continuation(void (*fn)(struct object *)) {
+  struct object * obj = malloc(sizeof(struct object *));
+  obj->type = TYPE_CONTINUATION;
+  obj->value.continuation = malloc(sizeof(struct continuation));
+  obj->value.continuation->fn = fn;
+  obj->value.continuation->type = CONT_BUILT_IN;
+  return obj;
+}
+
+// preparing for eval
+
+void evlis(struct object *list, struct object *env, struct object* k)
+{
+  if (list == NULL)
+    resume(k, NULL);
+  else
+    eval(car(list), env, make_shift_continuation(cdr(list), NULL, env, k));
+}
+
+struct object * invoke(struct object *obj, struct object *l, struct object * k) {
   struct procedure *p = obj->value.procedure;
   
   if (p->fn!= NULL)                     // if built-in procedure just run it
-    {
-      return p->fn(l);
+    resume(k,  p->fn(l));
+  else {
+
+    
+    struct object *vars = p->variables;
+    struct object *env = make_env(p->parent);            // create a new env
+  
+    while (vars != NULL) {                // bind variables
+      env_add_symbol(env, car(vars), car(l));
+      vars = cdr(vars);
+      l = cdr(l);
     }
-  
-  struct object *vars = p->variables;
-  struct object *env = make_env(p->parent);            // create a new env
-  
-  while (vars != NULL) {                // bind variables
-    env_add_symbol(env, car(vars), car(l));
-    vars = cdr(vars);
-    l = cdr(l);
-  }
-  
-  struct object* code = p->code;
-  struct object* result = NULL;
-  
-  while (code != NULL) {
-    result = eval(car(code), env);
-    code = cdr(code);
-  }
-
-  return result;
-}
-
-struct object* apply(struct object* obj, struct object* l, struct object *env) {
-  struct object *result;
-
-  switch (obj->type) {
-  case TYPE_ERROR:
-    return obj;
-  case TYPE_PROCEDURE: // is a procedure so evaluate args and invoke
-    l = evlis(l, env);    
-    return is_error(l) ? l : invoke(obj, l);
-  default:
-    return error_to_object("not a procedure. cannot invoke");
+    
+    struct object* code = p->code;
+    eval(car(code), env, make_rest_continuation(cdr(code), env, k));
   }
 }
 
-// eval
+void resume(struct object *k, struct object *obj) {
+  struct continuation *c = k->value.continuation;
+  struct object *args;
+  struct object *remain;
+  
+  switch (c->type) {
+  case CONT_BUILT_IN:
+    c->fn(obj);
+    break;
+  case CONT_IF:
+    eval(is_false(obj)? c->second : c->first, c->env, c->k); break;
+  case CONT_ADD_SYMBOL:
+    env_add_symbol(c->env, c->first, obj);
+    resume(c->k, c->first);
+    break;
+  case CONT_APPLICATION:
+    if (obj->type == TYPE_PROCEDURE) // obj is a procedure
+      evlis(c->first, c->env , make_invoke_continuation(obj, c->env, c->k));
+    else if (obj->type == TYPE_CONTINUATION)
+      eval(car(c->first), c->env, obj);
+    else
+      resume(c->k, error_to_object("not a procedure"));
+    break;
+  case CONT_INVOKE:
+    invoke(c->first, obj, c->k);
+    break;
+  case CONT_SHIFT:
+    args = cons(obj, c->second);
+    remain = c->first;
+    if (remain == NULL)
+      resume(c->k, args);
+    else
+      eval(car(remain), c->env, make_shift_continuation(cdr(remain), args, c->env, c->k));
+
+    break;
+  case CONT_REST:
+    if (c->first == NULL)
+      resume(c->k, obj);
+    else
+      eval(car(c->first), c->env, make_rest_continuation(cdr(c->first), c->env, c->k));
+  }
+}
+
+struct object * lambda(struct object *vars, struct object* code, struct object* env) {
+  struct procedure* p = malloc(sizeof(struct procedure));
+
+  p->variables = vars;
+  p->code = code;
+  p->fn = NULL;
+  p->parent = env;
+
+  return procedure_to_object(p);
+}
+
+struct object * define(struct object *subject, struct object* object, struct object* env, struct object* k) {
+  if (TYPE_SYMBOL == subject->type) {
+    eval(car(object), env, make_add_symbol_continuation(subject, env, k));
+  } else {
+    env_add_symbol(env, car(subject), lambda(cdr(subject), object, env));
+    resume(k, car(subject));
+  }
+}
 
 #define KEYWORD(k) (is_true(eq(car(e), symbol_to_object(k))))
 
-struct object* eval(struct object* e, struct object* env)
+void eval(struct object* e, struct object* env, struct object* k)
 {
-  //  printf("eval: ");
-  //  print(e);
-  struct object* result=NULL;
-  struct object* v;
-
+  //  printf("eval: ");  print(e);
   switch (e->type)
     {
     case TYPE_PAIR:
-      if KEYWORD("quote") result = quote(cadr(e));
-      else if KEYWORD("if") result = _if(cdr(e), env); 
-      else if KEYWORD("lambda") result = lambda(cadr(e), cddr(e), env);
-      else if KEYWORD("define") result = define(cadr(e), cddr(e), env);
-      else if KEYWORD("eq") result = eq(eval(cadr(e), env), eval(caddr(e), env));
-      else if KEYWORD("mac") result = e;
-      else if KEYWORD("cons")  result = cons(eval(cadr(e), env), eval(caddr(e), env));
-      else if KEYWORD("car")   result = car(eval(cadr(e), env));
-      else if KEYWORD("cdr")   result = cdr(eval(cadr(e), env));
-      else if KEYWORD("atom")  result = atom(eval(cadr(e), env));
-      else return apply(eval(car(e), env), cdr(e), env);
+      if KEYWORD("quote") resume(k, cadr(e)); 
+      else if KEYWORD("if") eval(cadr(e), env, make_if_continuation(caddr(e), cadddr(e), env, k));
+      else if KEYWORD("lambda") resume(k, lambda(cadr(e), cddr(e), env));
+      else if KEYWORD("define") define(cadr(e), cddr(e), env, k);
+      else if KEYWORD("ccc") eval(cadr(e),
+				  env,
+				  make_application_continuation(cons(k, NULL),
+								env,
+								k));
+      /*
+      else if KEYWORD("cons")
+      else if KEYWORD("car")   car(eval(cadr(e), env), k);
+      else if KEYWORD("cdr")   cdr(eval(cadr(e), env), k);
+      else if KEYWORD("eq") eq(eval(cadr(e), env), eval(caddr(e), env), k);
+      else if KEYWORD("mac") apply(k, e);
+      else if KEYWORD("atom")  atom(eval(cadr(e), env), k);
+      */
+      else eval(car(e),
+		env,
+		make_application_continuation(cdr(e), env, k));
 
       break;
+
     case TYPE_SYMBOL:
-	v = env_lookup(env, e);
-	if (v==NULL)
-	  {
-	    result= error_to_object("symbol not found\n"); 
-	  }
-	else
-	  result = v;
-	break;
+      env_lookup(env, e, k);
+      break;
     default:
-      result = e; // self quoting all
+      resume(k, e); // self quoting all
       break;
     }
-  //  printf("result: ");
-  //  print(result);
-  return result;
 }
 
 // read
 
-struct object* read() {
+void read(struct object* e, struct object* env, struct object* k) {
   printf("$ ");
   int n = yyparse();
-  return yylval;
+  resume(k, yylval);
 }
 
 // global environment
@@ -464,16 +527,26 @@ struct object* make_global_env() {
 
 void banner() {
   printf("Jude Lisp v0.1\nCopyright 2016 Omar Shorbaji\n");
-
 }
+
+void ep(struct object* e, struct object* env, struct object* k) {
+  eval(
+}
+
+void rep(struct object* e, struct object* env, struct object *k) {
+  read(NULL, env, ep);
+}
+
 // REPL
+
 int main(int argc, char** argv) {
 
   banner();
   
   struct object* global = make_global_env();
+  struct object* print_continuation = make_built_in_continuation(print);
   
   while (1) {
-    print(eval(read(), global));
+    eval(read(), global, print_continuation);
   }
 }
