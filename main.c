@@ -1,552 +1,360 @@
 #include <stdio.h>
-#include <malloc.h>
 #include <stdlib.h>
 #include <string.h>
 #include "jude.h"
 #include "jude.tab.h"
-
-// TODO
-// - unquote, quasiquote, comma_at
-// - macros
-// - tail recursion
-// - syntax for ' ` , ,@
-// - a garbage collector
-// - libraries
-
-// built-in procedures
-
-struct object* _plus_fn(struct object *e)
-{
-  char s[200];
-  int sum=0;
-  struct object* v;
-
-  while (e!=NULL) {
-    if (car(e)->type != TYPE_NUMBER) {
-      return error_to_object("not a number");
-    } else {
-      sum += car(e)->value.number;
-      e = cdr(e);
-    }
-  }
-
-  sprintf(s, "%d", sum);
-  return number_to_object(s);
-}
-
-struct object* _minus_fn(struct object *e)
-{
-  char s[200];
-  int sum=0;
-  struct object* v;
-
-  if (e!=NULL) {
-    if (car(e)->type != TYPE_NUMBER)
-	return error_to_object("not a number");
-    else {
-      sum += car(e)->value.number;
-      e = cdr(e);
-    }
-
-    while (e!=NULL) {
-      if (car(e)->type != TYPE_NUMBER) {
-	return error_to_object("not a number");
-      } else {
-	sum -= car(e)->value.number;
-	e = cdr(e);
-      }
-    }
-  }
-
-  sprintf(s, "%d", sum);
-  return number_to_object(s);
-}
-
-struct object* _times_fn(struct object *e)
-{
-  char s[200];
-  int product=1;
-  struct object* v;
-
-  while (e!=NULL) {
-    if (car(e)->type != TYPE_NUMBER) {
-      return error_to_object("not a number");
-    } else {
-      product *= car(e)->value.number;
-      e = cdr(e);
-    }
-  }
-
-  sprintf(s, "%d", product);
-  return number_to_object(s);
-}
-
-struct object* _divide_fn(struct object *e)
-{
-  char s[200];
-  int product=1;
-  struct object* v;
-
-  if ((e!=NULL) &&
-      (car(e)!=NULL) &&
-      (cdr(e)!=NULL) &&
-      (cadr(e) != NULL) &&
-      (TYPE_NUMBER == car(e)->type) &&
-      (TYPE_NUMBER == cadr(e)->type))
-    product = car(e)->value.number/cadr(e)->value.number;
-  else
-    return error_to_object("not a number");
-
-  sprintf(s, "%d", product);
-  return number_to_object(s);
-}
-
-struct object* make_builtin_procedure(struct object* (* fn) (struct object *e)) {
-  struct procedure* p = malloc(sizeof(struct procedure));
-  p->fn = fn;
-  p->code = NULL;
-  p->variables = NULL;
-
-  return procedure_to_object(p);  
-}
-
-void load(struct object *env, char *symbol, struct object *(* fn) (struct object *e)) {
-  env_add_symbol(env, symbol_to_object(symbol), make_builtin_procedure(fn));
-}
-
-void load_built_ins(struct object * env) {
-  load(env, "+", _plus_fn);
-  load(env, "-", _minus_fn);
-  load(env, "*", _times_fn);
-  load(env, "/", _divide_fn);
-}
-
-// built-in types
-
-struct object* number_to_object(char* s)
-{
-  struct object* e = malloc(sizeof(struct object));
-
-  e->type = TYPE_NUMBER;
-  e->value.number = atoi(s);
-
-  return e;
-}
-
-struct object* symbol_to_object(char *s)
-{
-  int l = strlen(s);
-  char* symbol = (char *) malloc(sizeof(char)*strlen(s));
-  struct object* e = malloc(sizeof(struct object));
-
-  strncpy(symbol, s, l);
-  e->type = TYPE_SYMBOL;
-  e->value.symbol = symbol;
-
-  return e;
-}
-
-struct object* boolean_to_object(int b)
-{
-  struct object* e = malloc(sizeof(struct object));
-  e->type = TYPE_BOOLEAN;
-  e->value.boolean = b;
-
-  return e;
-}
-
-struct object* procedure_to_object(struct procedure* procedure)
-{
-  struct object* e = malloc(sizeof(struct object));
-
-  e->type = TYPE_PROCEDURE;
-  e->value.procedure = procedure;
-
-  return e;
-}
-
-struct object* error_to_object(char *error)
-{
-  struct object* e = malloc(sizeof(struct object));
-  e->type = TYPE_ERROR;
-  e->value.error = malloc(sizeof(char)*strlen(error));
-  strncpy(e->value.error, error, strlen(error));
-
-  return e;
-}
-
-int is_error(struct object *e) {
-  return e->type == TYPE_ERROR;
-}
-
-int is_false(struct object *e) {
-  return (e->type == TYPE_BOOLEAN) && (e->value.boolean == 0);
-}
-int is_true(struct object *e) {
-  return !is_false(e); 
-}
+#include "uthash.h"
 
 // environment
 
-void env_add_symbol(struct object * env, struct object* symbol, struct object* value)
+void env_add_symbol(env_t * env, object_t* symbol, object_t* value)
 {
   struct hash_entry * h_entry = malloc(sizeof(struct hash_entry));
   h_entry->key = symbol->value.symbol;
   h_entry->value = value;
-  HASH_ADD_STR(env->value.env.hash, key, h_entry);
+  HASH_ADD_STR(env->hash, key, h_entry);
 }
 
-struct object* env_lookup(struct object* env, struct object* symbol, struct object* k) {
+struct object* env_lookup(env_t* env, object_t* symbol, continuation_t* k) {
   struct hash_entry *h_entry;
 
-  HASH_FIND_STR(env->value.env.hash, symbol->value.symbol, h_entry);
+  HASH_FIND_STR(env->hash, symbol->value.symbol, h_entry);
 
   if (h_entry == NULL)
-    if (env->value.env.parent == NULL)
-      resume(k, error_to_object("unknown symbol"));
+    if (env->parent == NULL)
+      {
+	resume(k, make_error_object("unknown symbol"));
+      }
     else
-      env_lookup(env->value.env.parent, symbol, k);
+      env_lookup(env->parent, symbol, k);
   else
     resume(k, h_entry->value);
 }
+// type contructors for builtin_t, procedure_t, continuation_t
 
-struct object *make_env(struct object* parent) {
-  struct object *env = malloc(sizeof(struct object));
+builtin_t *make_builtin(char *name, c_function_t function)
+{
+  builtin_t *b = malloc(sizeof(builtin_t));
 
-  env->value.env.hash = NULL;
-  env->value.env.parent = parent;
+  b->name = name;
+  b->function = function;
 
-  return env;
+  return b;
 }
 
-// print
+lambda_t *make_lambda(env* env, object_t *vars, object_t *code) {
+  lambda_t *l = malloc(sizeof(lambda_t));
 
-void print_pair(struct object *e) {
-  printf("(");
-  while (e!=NULL) {
-    print_datum(car(e));
-    if (cdr(e)!= NULL)
-      if (cdr(e)->type != TYPE_PAIR) {
-	printf(" . ");
-	print_datum(cdr(e));
-	e = NULL;
-      } else {
-	printf(" ");
-	e=cdr(e);
-      }
-    else
-      e=NULL;
+  l->env = env;
+  l->vars = vars;
+  l->code = code;
+
+  return l;
+}
+
+procedure_t* make_procedure(procedure_type_t type, int min, int max, builtin_t builtin, lambda_t *lambda)
+{
+  procedure_t *p = malloc(sizeof(procedure_t));
+
+  p->type = type;
+  p->min = min;
+  p->max = max;
+  p->builtin = builtin;
+  p->lambda = lambda;
+
+  return p;
+}
+
+procedure_t* make_builtin_procedure(char *name, c_function_t function, int min, int max)
+{
+   make_procedure(PROCEDURE_TYPE_BUILTIN, min, max, make_builtin(name, function));
+}
+
+procedure_t* make_lambda_procedure(env_t *env, object_t *vars, object_t *code, int min, int max)
+{
+  make_procedure(PROCEDURE_TYPE_LAMBDA, min, max, make_lambda(env, vars, code);
+
+
+
+
+
+
+
+
+
+}
+// object constructors
+
+object_t *make_number_object(int n) {
+  object_t *object = malloc(sizeof(object_t));
+
+  object->type = OBJECT_TYPE_NUMBER;
+  object->value.number = n;
+
+  return object;
+}
+
+object_t *make_boolean_object(int n) {
+  object_t *object = malloc(sizeof(object_t));
+
+  object->type = OBJECT_TYPE_BOOLEAN;
+  object->value.boolean = n;
+
+  return object;
+}
+
+object_t *make_symbol_object(char* symbol) {
+  object_t *object = malloc(sizeof(object_t));
+
+  object->type = OBJECT_TYPE_SYMBOL;
+  object->value.symbol = symbol;
+
+  return object;
+}
+
+object_t *make_error_object(char* error) {
+  object_t *object = malloc(sizeof(object_t));
+
+  object->type = OBJECT_TYPE_ERROR;
+  object->value.error = error;
+
+  return object;
+}
+
+object_t *make_continuation_object(continuation_t *c) {
+  object_t *object = malloc(sizeof(object_t));
+
+  object->type = OBJECT_TYPE_CONTINUATION;
+  object->value.continuation = c;
+
+  return object;
+}
+
+object_t *make_procedure_object(procedure_t *p) {
+  object_t *object = malloc(sizeof(object_t));
+
+  object->type = OBJECT_TYPE_PROCEDURE;
+  object->value.procedure = p;
+
+  return object;
+}
+
+//
+
+char *number_to_str(int n) {
+  char *str = malloc(20 * sizeof(char));
+
+  sprintf(str, "%d", n);
+
+  return str;
+}
+
+builtin_t *make_builtin(char* name, c_function_t function)
+{
+  builtin_t *c_fn = malloc(sizeof(builtin_t));
+  c_fn->name = name;
+  c_fn->function = function;
+
+  return c_fn;
+}
+
+
+char *object_to_str(object_t *object) {
+  char *s;
+
+  if (object == NULL) {
+    
+    s = malloc(5 * sizeof(char));
+    strcpy(s, "NULL");
+  } else {
+    switch (object->type) {
+    case OBJECT_TYPE_NUMBER:
+      s = number_to_str(object->value.number); break;
+    case OBJECT_TYPE_SYMBOL:
+      s = object->value.symbol; break;
+    case OBJECT_TYPE_CONTINUATION:
+      s = "<continuation>"; break;
+    case OBJECT_TYPE_PAIR:
+      s = "<pair>"; break;
+    case OBJECT_TYPE_ERROR:
+      s = malloc(7 + strlen(object->value.error));
+      strcpy(s, "error: ");
+      strcpy(s+7, object->value.error);
+      break;
+    default:
+      s = malloc(100);
+      strcpy(s, "<object>"); 
+    }
   }
-  printf(")");
+
+  return s;
 }
 
-void print_datum(struct object *obj) {
-  switch (obj->type) {
-    case TYPE_NUMBER:
-      printf("%d", obj->value.number); break;
-    case TYPE_SYMBOL:
-      printf("%s", obj->value.symbol); break;
-    case TYPE_BOOLEAN:
-      printf(is_false(obj) ? "#f" : "#t"); break; 
-    case TYPE_PROCEDURE:
-      printf("<procedure>"); break;
-    case TYPE_PAIR:
-      print_pair(obj); break;
-    case TYPE_ERROR:
-      printf("error: %s", obj->value.error); break;
-  }
+
+// built ins
+
+object_t *print(object_t *object) {
+  printf("> %s\n", object_to_str(object));
+  return NULL;
 }
 
-void print(struct object* e) {
-  if (e!=NULL)
-    print_datum(e);
-  printf("\n");
+object_t *read() {
+  printf("$ ");
+  int n = yyparse();
+
+  return yylval;
 }
 
-// special forms
+object_t *cons(object_t *a, object_t *b) {
+  object_t *object = malloc(sizeof(object_t));
 
-// built-in forms for eval: quote, if, atom, eq, cons, car, cdr
+  object->type = OBJECT_TYPE_PAIR;
+  object->value.pair.car = a;
+  object->value.pair.cdr = b;
 
-struct object* atom(struct object *e)
-{
-  if (is_error(e)) return e;
-  return boolean_to_object(e->type != TYPE_PAIR);
+  return object;
 }
 
-struct object* eq(struct object* a, struct object* b)
-{
-  if (is_error(a)) return (a);
-  if (is_error(b)) return (b);  
-
-  return
-    boolean_to_object((a->type == b->type) &&
-		    (((a->type == TYPE_NUMBER) && (a->value.number == b->value.number)) ||
-		     ((a->type == TYPE_SYMBOL) && !strcmp(a->value.symbol, b->value.symbol)) ||
-		     ((a->type == TYPE_PAIR) && (a==b))));
+object_t *car(object_t *pair) {
+  return pair->value.pair.car;
 }
 
-struct object* cons(struct object* car, struct object* cdr)
-{
-  struct object* e = malloc(sizeof(struct object*));
-
-  e->type = TYPE_PAIR;
-  e->value.pair.car = car;
-  e->value.pair.cdr = cdr;
-
-  return e;
+object_t *cdr(object_t *pair) {
+  return pair->value.pair.cdr;
 }
 
-struct object* car(struct object *e) {  return e->value.pair.car;}
-struct object* cdr(struct object *e) {  return e->value.pair.cdr; }
+object_t *cadr(object_t *o)   { car(cdr(o)); }
+object_t *cddr(object_t *o)   { cdr(cdr(o)); }
+object_t *caddr(object_t *o)  { car(cddr(o)); }
+object_t *cdddr(object_t *o)  { cdr(cddr(o)); }
+object_t *cadddr(object_t *o) { car(cdddr(o)); }
+object_t *cddddr(object_t *o) { cdr(cdddr(o)); }
 
-// helper functions for eval
-
-struct object* cddr(struct object *e) { return cdr(cdr(e)); }
-struct object* cadr(struct object *e) { return car(cdr(e)); }
-struct object* caddr(struct object *e) { return car(cdr(cdr(e))); }
-struct object* cadddr(struct object *e) { return car(cdr(cdr(cdr(e)))); }
-
-// continuations
-
-struct object *continuation_to_object(struct continuation *k) {
-  struct object *obj = malloc(sizeof(struct object));
-  obj->type = TYPE_CONTINUATION;
-  obj->value.continuation = k;
-
-  return obj;
+int length(object_t* object) {
+  if (object == NULL)
+    return 0;
+  else if (object->type == OBJECT_TYPE_PAIR)
+    return 1 + length(cdr(object));
+  else
+    return 1;
 }
-  
-struct object *make_continuation(int type,
-				 struct object *first,
-				 struct object *second,
-				 struct object *env,
-				 struct object *k)
-{
-  struct continuation *c = malloc(sizeof(struct continuation));
 
-  c->type = type;
-  c->first = first;
-  c->second = second;
-  c->env = env;
+/*
+continuation_t * make_primitive_continuation(char* symbol,
+					     int min,
+					     int max,
+					     _builtin_t builtin,
+					     continuation_t* k) {
+  continuation_t *c = malloc(sizeof(continuation_t));
+
+  c->type = CONTINUATION_TYPE_BUILTIN;
+  c->min = min;
+  c->max = max;
+  c->builtin = builtin;
+  c->env = NULL;
   c->k = k;
 
-  return continuation_to_object(c);
+  return c;
 }
+*/
 
-struct object *make_if_continuation(struct object *consequent, struct object *alternative, struct object *env, struct object *k)
+continuation_t * make_define_continuation(object_t* subject,
+					  env_t* env,
+					  continuation_t* k)
 {
-  return make_continuation(CONT_IF, consequent, alternative, env, k);
 }
 
-struct object *make_add_symbol_continuation(struct object *subject, struct object *env, struct object *k)
-{
-  return make_continuation(CONT_ADD_SYMBOL, subject, NULL, env, k);
-}
-
-struct object *make_application_continuation(struct object *args, struct object *env, struct object *k)
-{
-  return make_continuation(CONT_APPLICATION, args, NULL, env, k);
-  
-}
-struct object *make_invoke_continuation(struct object* fn, struct object *env, struct object *k)
-{
-  return make_continuation(CONT_INVOKE, fn, NULL, env, k);
-}
-
-struct object *make_shift_continuation(struct object* remain, struct object* done, struct object *env, struct object *k)
-{
-  return make_continuation(CONT_SHIFT, remain, done, env, k);
-}
-
-struct object *make_rest_continuation(struct object* rest, struct object* env, struct object* k)
-{
-  return make_continuation(CONT_REST, rest, NULL, env, k);
-}
-
-struct object *make_built_in_continuation(void (*fn)(struct object *)) {
-  struct object * obj = malloc(sizeof(struct object *));
-  obj->type = TYPE_CONTINUATION;
-  obj->value.continuation = malloc(sizeof(struct continuation));
-  obj->value.continuation->fn = fn;
-  obj->value.continuation->type = CONT_BUILT_IN;
-  return obj;
-}
-
-// preparing for eval
-
-void evlis(struct object *list, struct object *env, struct object* k)
-{
-  if (list == NULL)
-    resume(k, NULL);
-  else
-    eval(car(list), env, make_shift_continuation(cdr(list), NULL, env, k));
-}
-
-struct object * invoke(struct object *obj, struct object *l, struct object * k) {
-  struct procedure *p = obj->value.procedure;
-  
-  if (p->fn!= NULL)                     // if built-in procedure just run it
-    resume(k,  p->fn(l));
-  else {
-
-    
-    struct object *vars = p->variables;
-    struct object *env = make_env(p->parent);            // create a new env
-  
-    while (vars != NULL) {                // bind variables
-      env_add_symbol(env, car(vars), car(l));
-      vars = cdr(vars);
-      l = cdr(l);
-    }
-    
-    struct object* code = p->code;
-    eval(car(code), env, make_rest_continuation(cdr(code), env, k));
-  }
-}
-
-void resume(struct object *k, struct object *obj) {
-  struct continuation *c = k->value.continuation;
-  struct object *args;
-  struct object *remain;
-  
-  switch (c->type) {
-  case CONT_BUILT_IN:
-    c->fn(obj);
-    break;
-  case CONT_IF:
-    eval(is_false(obj)? c->second : c->first, c->env, c->k); break;
-  case CONT_ADD_SYMBOL:
-    env_add_symbol(c->env, c->first, obj);
-    resume(c->k, c->first);
-    break;
-  case CONT_APPLICATION:
-    if (obj->type == TYPE_PROCEDURE) // obj is a procedure
-      evlis(c->first, c->env , make_invoke_continuation(obj, c->env, c->k));
-    else if (obj->type == TYPE_CONTINUATION)
-      eval(car(c->first), c->env, obj);
-    else
-      resume(c->k, error_to_object("not a procedure"));
-    break;
-  case CONT_INVOKE:
-    invoke(c->first, obj, c->k);
-    break;
-  case CONT_SHIFT:
-    args = cons(obj, c->second);
-    remain = c->first;
-    if (remain == NULL)
-      resume(c->k, args);
-    else
-      eval(car(remain), c->env, make_shift_continuation(cdr(remain), args, c->env, c->k));
-
-    break;
-  case CONT_REST:
-    if (c->first == NULL)
-      resume(c->k, obj);
-    else
-      eval(car(c->first), c->env, make_rest_continuation(cdr(c->first), c->env, c->k));
-  }
-}
-
-struct object * lambda(struct object *vars, struct object* code, struct object* env) {
-  struct procedure* p = malloc(sizeof(struct procedure));
-
-  p->variables = vars;
-  p->code = code;
-  p->fn = NULL;
-  p->parent = env;
-
-  return procedure_to_object(p);
-}
-
-struct object * define(struct object *subject, struct object* object, struct object* env, struct object* k) {
-  if (TYPE_SYMBOL == subject->type) {
-    eval(car(object), env, make_add_symbol_continuation(subject, env, k));
+/*
+void eval_define(object_t *subject, object_t* object, env_t* env, continuation_t* k) {
+  if (OBJECT_TYPE_SYMBOL == subject->type) {
+    eval(car(object), env, make_define_continuation(subject, env, k));
   } else {
     env_add_symbol(env, car(subject), lambda(cdr(subject), object, env));
     resume(k, car(subject));
   }
 }
+*/
 
-#define KEYWORD(k) (is_true(eq(car(e), symbol_to_object(k))))
+void eval(object_t *e, env_t *env, continuation_t *k) {
 
-void eval(struct object* e, struct object* env, struct object* k)
-{
-  //  printf("eval: ");  print(e);
   switch (e->type)
     {
-    case TYPE_PAIR:
-      if KEYWORD("quote") resume(k, cadr(e)); 
-      else if KEYWORD("if") eval(cadr(e), env, make_if_continuation(caddr(e), cadddr(e), env, k));
-      else if KEYWORD("lambda") resume(k, lambda(cadr(e), cddr(e), env));
-      else if KEYWORD("define") define(cadr(e), cddr(e), env, k);
-      else if KEYWORD("ccc") eval(cadr(e),
-				  env,
-				  make_application_continuation(cons(k, NULL),
-								env,
-								k));
-      /*
-      else if KEYWORD("cons")
-      else if KEYWORD("car")   car(eval(cadr(e), env), k);
-      else if KEYWORD("cdr")   cdr(eval(cadr(e), env), k);
-      else if KEYWORD("eq") eq(eval(cadr(e), env), eval(caddr(e), env), k);
-      else if KEYWORD("mac") apply(k, e);
-      else if KEYWORD("atom")  atom(eval(cadr(e), env), k);
-      */
-      else eval(car(e),
-		env,
-		make_application_continuation(cdr(e), env, k));
-
-      break;
-
-    case TYPE_SYMBOL:
+    case OBJECT_TYPE_PAIR:
+      //      if (!strcmp(car(e)->value.symbol, "define"))
+      //	eval_define(cadr(e), cddr(e), env, k);
+      //      else
+      resume(k, e); break;
+    case OBJECT_TYPE_NUMBER:
+    case OBJECT_TYPE_ERROR:
+    case OBJECT_TYPE_CONTINUATION:
+      resume(k, e);
+    case OBJECT_TYPE_SYMBOL:
       env_lookup(env, e, k);
       break;
     default:
-      resume(k, e); // self quoting all
-      break;
+      resume(k, make_error_object("eval fell of with unknown expression type\n"));
     }
 }
 
-// read
-
-void read(struct object* e, struct object* env, struct object* k) {
-  printf("$ ");
-  int n = yyparse();
-  resume(k, yylval);
-}
-
-// global environment
-
-struct object* make_global_env() {
-  struct object* env = malloc(sizeof(struct object));
-  env->value.env.parent = NULL;
-  load_built_ins(env);
-
-  return env;
-}
-
-void banner() {
-  printf("Jude Lisp v0.1\nCopyright 2016 Omar Shorbaji\n");
-}
-
-void ep(struct object* e, struct object* env, struct object* k) {
-  eval(
-}
-
-void rep(struct object* e, struct object* env, struct object *k) {
-  read(NULL, env, ep);
-}
-
-// REPL
-
-int main(int argc, char** argv) {
-
-  banner();
+void invoke_builtin(procedure_t *p, object_t *args, env_t* env, continuation_t* k) {
+  object_t *result = NULL;
+  int len = length(args);
   
-  struct object* global = make_global_env();
-  struct object* print_continuation = make_built_in_continuation(print);
+  if ((p->min == 1) && (p->max == 1)) {
+    result = p->builtin.function.unary(args);
+  } else if (((p->min==-1) || (len>=p->min)) &&
+	     ((p->max==-1) || (len<=p->max))) {
+    switch (len) {
+    case 0:
+      result = p->builtin.function.thunk(); break;
+    case 2:
+      result = p->builtin.function.binary(car(args), cadr(args)); break;
+    case 3:
+      result = p->builtin.function.ternary(car(args), cadr(args), caddr(args)); break;
+    case 4:
+      result = p->builtin.function.four_ary(car(args), cadr(args), caddr(args), cadddr(args)); break;
+    }
+  } else {
+    result = make_error_object("wrong arity");
+  }
+  
+  resume(k, result);
+}
+void invoke(invocable * i, object_t *obj, env_t* env, continuation_t* k) {
+  switch (i->type)
+    {
+    case INVOCABLE_TYPE_BUILTIN:
+      invoke_builtin(i->procedure, obj, env, k); break;
+    case INVOCABLE_TYPE_LAMBDA:
+      invoke_lambda(i->procedure, obj, env, k); break;
+    case INVOCABLE_TYPE_CONTINUATION:
+      resume(i->continuation, obj); break;
+    }
+  printf("invoke fell off\n");
+}
+
+void resume(continuation_t *k, object_t *object) {
+  if (k == NULL) {
+    printf("exiting with null continuation\n");
+    exit(0);
+  }
+
+  k->resume(k, object);
+}
+
+int main(int argc, char **argv) {
+
+  env_t *genv = malloc(sizeof(env_t));
+  genv->parent = NULL; 
+  //  procedure_* c_print = make_builtin_procedure("print", (c_function_t) print);
+  //  continuation_t* c_eval = make_primitive_continuation("eval", 0, 0, eval, c_print);
+  //  continuation_t* c_read = make_primitive_continuation("read", 0, 0, read, c_eval);
+  //  c_print->k = c_read;
+
+  procedure_t * c_print = make_builtin_procedure("print", (c_function_t) print);
+  continuation_t *print_continuation = make_builtin_continuation(c_print);
   
   while (1) {
-    eval(read(), global, print_continuation);
+    eval(read(), genv, print_continuation);
   }
 }
