@@ -30,19 +30,35 @@ struct object* env_lookup(env_t* env, object_t* symbol, continuation_t* k) {
   else
     resume(k, h_entry->value);
 }
+
+
+int is_error(object_t *e) {
+  return e->type == OBJECT_TYPE_ERROR;
+}
+
+int is_false(struct object *e) {
+  return (e->type == OBJECT_TYPE_BOOLEAN) && (e->value.boolean == 0);
+}
+int is_true(struct object *e) {
+  return !is_false(e); 
+}
+
+
 // type contructors for builtin_t, procedure_t, continuation_t
 
-builtin_t *make_builtin(char *name, c_function_t function)
+builtin_t *make_builtin(char *name, c_function_t function, invoke_t invoke)
 {
   builtin_t *b = malloc(sizeof(builtin_t));
 
-  b->name = name;
+  b->name = malloc(sizeof(name));
+  strcpy(b->name, name);
   b->function = function;
-
+  b->invoke = invoke;
+  
   return b;
 }
 
-lambda_t *make_lambda(env* env, object_t *vars, object_t *code) {
+lambda_t *make_lambda(env_t* env, object_t *vars, object_t *code) {
   lambda_t *l = malloc(sizeof(lambda_t));
 
   l->env = env;
@@ -52,37 +68,48 @@ lambda_t *make_lambda(env* env, object_t *vars, object_t *code) {
   return l;
 }
 
-procedure_t* make_procedure(procedure_type_t type, int min, int max, builtin_t builtin, lambda_t *lambda)
+procedure_t *make_procedure(procedure_type_t type, int arity, builtin_t *builtin, lambda_t *lambda)
 {
   procedure_t *p = malloc(sizeof(procedure_t));
 
   p->type = type;
-  p->min = min;
-  p->max = max;
+  p->arity = arity;
   p->builtin = builtin;
   p->lambda = lambda;
 
   return p;
 }
 
-procedure_t* make_builtin_procedure(char *name, c_function_t function, int min, int max)
+procedure_t *make_builtin_procedure(char *name, c_function_t function, int arity)
 {
-   make_procedure(PROCEDURE_TYPE_BUILTIN, min, max, make_builtin(name, function));
+
+  return make_procedure(PROCEDURE_TYPE_BUILTIN,
+			arity,
+			make_builtin(name, function, invoke_builtin),
+			NULL);
+
 }
 
-procedure_t* make_lambda_procedure(env_t *env, object_t *vars, object_t *code, int min, int max)
-{
-  make_procedure(PROCEDURE_TYPE_LAMBDA, min, max, make_lambda(env, vars, code);
-
-
-
-
-
-
-
-
-
+procedure_t *make_special_procedure(char *name, c_function_t function) {
+  return make_procedure(PROCEDURE_TYPE_SPECIAL, 0, make_builtin(name, function, invoke_special), NULL);
 }
+
+procedure_t *make_lambda_procedure(env_t *env, object_t *vars, object_t *code)
+{
+  return make_procedure(PROCEDURE_TYPE_LAMBDA, length(vars), NULL, make_lambda(env, vars, code));
+}
+
+continuation_t *make_continuation(resume_t resume, object_t* data, env_t* env, continuation_t *k) {
+  continuation_t *c = malloc(sizeof(continuation_t));
+
+  c->resume = resume;
+  c->data = data;
+  c->env = env;
+  c->k = k;
+
+  return c;
+}
+
 // object constructors
 
 object_t *make_number_object(int n) {
@@ -106,8 +133,11 @@ object_t *make_boolean_object(int n) {
 object_t *make_symbol_object(char* symbol) {
   object_t *object = malloc(sizeof(object_t));
 
+  object->value.symbol = malloc(sizeof(symbol));
+
+  strcpy(object->value.symbol, symbol);
+  
   object->type = OBJECT_TYPE_SYMBOL;
-  object->value.symbol = symbol;
 
   return object;
 }
@@ -149,52 +179,70 @@ char *number_to_str(int n) {
   return str;
 }
 
-builtin_t *make_builtin(char* name, c_function_t function)
-{
-  builtin_t *c_fn = malloc(sizeof(builtin_t));
-  c_fn->name = name;
-  c_fn->function = function;
+char *object_to_str(object_t *);
 
-  return c_fn;
+void print_object(object_t *);
+
+void print_pair(object_t *e) {
+  printf("(");
+  while (e!=NULL) {
+    print_object(car(e));
+    if (cdr(e)!= NULL)
+      if (cdr(e)->type != OBJECT_TYPE_PAIR) {
+	printf(" . ");
+	print_object(cdr(e));
+	e = NULL;
+      } else {
+	printf(" ");
+	e=cdr(e);
+      }
+    else
+      e=NULL;
+  }
+  printf(")");
 }
 
 
-char *object_to_str(object_t *object) {
-  char *s;
-
+void print_object(object_t *object) {
   if (object == NULL) {
-    
-    s = malloc(5 * sizeof(char));
-    strcpy(s, "NULL");
+    printf("NULL");
   } else {
-    switch (object->type) {
-    case OBJECT_TYPE_NUMBER:
-      s = number_to_str(object->value.number); break;
-    case OBJECT_TYPE_SYMBOL:
-      s = object->value.symbol; break;
-    case OBJECT_TYPE_CONTINUATION:
-      s = "<continuation>"; break;
-    case OBJECT_TYPE_PAIR:
-      s = "<pair>"; break;
-    case OBJECT_TYPE_ERROR:
-      s = malloc(7 + strlen(object->value.error));
-      strcpy(s, "error: ");
-      strcpy(s+7, object->value.error);
-      break;
-    default:
-      s = malloc(100);
-      strcpy(s, "<object>"); 
-    }
+    switch (object->type)
+      {
+      case OBJECT_TYPE_NUMBER:
+	printf("%d", object->value.number);
+	break;
+      case OBJECT_TYPE_SYMBOL:
+	printf("%s", object->value.symbol);
+	break;
+      case OBJECT_TYPE_BOOLEAN:
+	printf(object->value.boolean ? "#t" : "#f");
+	break;
+      case OBJECT_TYPE_CONTINUATION:
+	printf( "<continuation>");
+	break;
+      case OBJECT_TYPE_PROCEDURE:
+	printf( "<procedure>");
+	break;
+      case OBJECT_TYPE_PAIR:
+	print_pair(object);
+	break;
+      case OBJECT_TYPE_ERROR:
+	printf("error: %s", object->value.error);
+	break;
+      default:
+	printf("<object>");
+      }
   }
 
-  return s;
 }
-
 
 // built ins
 
 object_t *print(object_t *object) {
-  printf("> %s\n", object_to_str(object));
+  printf("> ");
+  print_object(object);
+  printf("\n");
   return NULL;
 }
 
@@ -239,120 +287,284 @@ int length(object_t* object) {
     return 1;
 }
 
-/*
-continuation_t * make_primitive_continuation(char* symbol,
-					     int min,
-					     int max,
-					     _builtin_t builtin,
-					     continuation_t* k) {
-  continuation_t *c = malloc(sizeof(continuation_t));
-
-  c->type = CONTINUATION_TYPE_BUILTIN;
-  c->min = min;
-  c->max = max;
-  c->builtin = builtin;
-  c->env = NULL;
-  c->k = k;
-
-  return c;
-}
-*/
-
-continuation_t * make_define_continuation(object_t* subject,
-					  env_t* env,
-					  continuation_t* k)
+void resume_define(continuation_t *c, object_t* value)
 {
+  env_add_symbol(c->env, c->data, value); 
+  resume(c->k, c->data);
 }
 
-/*
-void eval_define(object_t *subject, object_t* object, env_t* env, continuation_t* k) {
+void __define(object_t *e, env_t* env, continuation_t* k)
+{
+  object_t *subject = car(e);
+  object_t *object = cdr(e);
+  
   if (OBJECT_TYPE_SYMBOL == subject->type) {
-    eval(car(object), env, make_define_continuation(subject, env, k));
+    eval(car(object), env, make_continuation(resume_define, subject, env, k));
   } else {
-    env_add_symbol(env, car(subject), lambda(cdr(subject), object, env));
+    object_t *vars = cdr(subject);
+    object_t *code = object;
+
+    env_add_symbol(env, car(subject), make_procedure_object(make_lambda_procedure(env, vars, code)));
     resume(k, car(subject));
   }
 }
-*/
+
+void resume_if(continuation_t *c, object_t *value)
+{
+  object_t* rest = c->data;
+  continuation_t* k = c->k;
+  env_t *env = c->env;
+  
+  if (is_error(value))
+    resume(k, value);
+
+  else if (rest == NULL)
+    resume(k, make_error_object("if requires at least one argument"));
+
+  else
+    {
+      object_t* consequent = car(rest);
+
+      if (is_true(value))
+	eval(consequent, env, k);
+      else if (cdr(rest)!=NULL)
+	eval(cadr(rest), env, k);
+    }
+}
+
+void __if(object_t *e, env_t *env, continuation_t* k)
+{
+  object_t *predicate = cdr(e);
+  object_t *rest = cdr(e);
+
+  eval(predicate, env, make_continuation(resume_if, rest, env, k));
+}
+   
+void __lambda(object_t *e, env_t* env, continuation_t *k)
+{
+  object_t *vars = car(e);
+  object_t *code = cdr(e);
+
+  resume(k, make_procedure_object(make_lambda_procedure(env, vars, code)));
+}
+
+object_t* __quote(object_t *e, env_t* env, continuation_t *k)
+{
+  resume(k, car(e));
+}
+
+void resume_ccc(continuation_t* c, object_t *p)
+{
+  invoke(make_procedure_object(p->value.procedure),
+	 make_continuation_object(c->k),
+	 c->env,
+	 c->k);
+}
+
+void __ccc(object_t *e, env_t* env, continuation_t *k) {
+  eval(car(e), env, make_continuation(resume_ccc, NULL, env, k));
+}
+
+void __begin(object_t *e, env_t* env, continuation_t *k);
+
+void resume_begin(continuation_t* c, object_t *object) {
+  object_t *remain = c->data;
+
+  if (remain == NULL)
+    resume(c->k, object);
+  else
+    __begin(remain, c->env, c->k);
+}
+
+void __begin(object_t *e, env_t* env, continuation_t *k) {
+  eval(car(e), env, make_continuation(resume_begin, cdr(e), env, k));
+}
+
+#define KEYWORD(s) !strcmp(car(e)->value.symbol, s)
+
+void resume_invoke(continuation_t * c, object_t* object) {
+  invoke(object, c->data, c->env, c->k);
+}
 
 void eval(object_t *e, env_t *env, continuation_t *k) {
-
   switch (e->type)
     {
-    case OBJECT_TYPE_PAIR:
-      //      if (!strcmp(car(e)->value.symbol, "define"))
-      //	eval_define(cadr(e), cddr(e), env, k);
-      //      else
-      resume(k, e); break;
+    case OBJECT_TYPE_SYMBOL:
+      env_lookup(env, e, k); break;
     case OBJECT_TYPE_NUMBER:
     case OBJECT_TYPE_ERROR:
     case OBJECT_TYPE_CONTINUATION:
-      resume(k, e);
-    case OBJECT_TYPE_SYMBOL:
-      env_lookup(env, e, k);
+    case OBJECT_TYPE_PROCEDURE:
+    case OBJECT_TYPE_BOOLEAN:
+      resume(k, e); break;
+    case OBJECT_TYPE_PAIR:
+      eval(car(e), env, make_continuation(resume_invoke, cdr(e), env, k));
       break;
+      /*
+      if (car(e)->type == OBJECT_TYPE_SYMBOL) {
+	if (KEYWORD("quote"))	    eval_quote(cdr(e), env, k);
+	else if (KEYWORD("define")) eval_define(cdr(e) , env, k);
+	else if (KEYWORD("if"))	    eval_if(cdr(e), env, k);
+	else if (KEYWORD("lambda")) eval_lambda(cdr(e), env, k);
+	else if (KEYWORD("ccc"))    eval_ccc(cdr(e), env, k);
+	else {
+	  printf("lookup symbol and apply if procedure");
+	  resume(k, e);
+	}
+      } else {
+	printf("look for an invocable and invoke it\n");
+	resume(k, e);
+      }
+      */
     default:
-      resume(k, make_error_object("eval fell of with unknown expression type\n"));
+      resume(k, make_error_object("eval fell of with unknown expression type\n")); break;
     }
+
 }
 
-void invoke_builtin(procedure_t *p, object_t *args, env_t* env, continuation_t* k) {
-  object_t *result = NULL;
-  int len = length(args);
-  
-  if ((p->min == 1) && (p->max == 1)) {
-    result = p->builtin.function.unary(args);
-  } else if (((p->min==-1) || (len>=p->min)) &&
-	     ((p->max==-1) || (len<=p->max))) {
-    switch (len) {
-    case 0:
-      result = p->builtin.function.thunk(); break;
-    case 2:
-      result = p->builtin.function.binary(car(args), cadr(args)); break;
-    case 3:
-      result = p->builtin.function.ternary(car(args), cadr(args), caddr(args)); break;
-    case 4:
-      result = p->builtin.function.four_ary(car(args), cadr(args), caddr(args), cadddr(args)); break;
-    }
-  } else {
-    result = make_error_object("wrong arity");
-  }
-  
-  resume(k, result);
+void resume_gather(continuation_t *c, object_t* o)
+{
+  resume(c->k, cons(c->data, o));
 }
-void invoke(invocable * i, object_t *obj, env_t* env, continuation_t* k) {
-  switch (i->type)
-    {
-    case INVOCABLE_TYPE_BUILTIN:
-      invoke_builtin(i->procedure, obj, env, k); break;
-    case INVOCABLE_TYPE_LAMBDA:
-      invoke_lambda(i->procedure, obj, env, k); break;
-    case INVOCABLE_TYPE_CONTINUATION:
-      resume(i->continuation, obj); break;
-    }
-  printf("invoke fell off\n");
+
+
+void __args(object_t *args, env_t * env, continuation_t* k);
+  
+void resume_args(continuation_t *c, object_t* o)
+{
+  __args(c->data, c->env, make_continuation(resume_gather, o, c->env, c->k));
+}
+
+void __args(object_t *args, env_t * env, continuation_t* k) {
+  if (args == NULL)
+    resume(k, NULL);
+  else if (OBJECT_TYPE_PAIR == args->type)    
+    eval(car(args), env, make_continuation(resume_args, cdr(args), env, k));
+  else
+    eval(args, env, k);
+}
+
+void invoke_thunk(procedure_t *p, object_t *args, env_t* env, continuation_t* k) {
+  resume(k, p->builtin->function.thunk());
+}
+
+void invoke_with_list(procedure_t *p, object_t *args, env_t* env, continuation_t* k) {
+  resume(k, p->builtin->function.unary(args));
+}
+
+void invoke_unary(procedure_t *p, object_t *args, env_t* env, continuation_t* k) {
+  resume(k, p->builtin->function.unary(car(args)));
+}
+
+void invoke_binary(procedure_t *p, object_t *args, env_t* env, continuation_t* k) {
+  resume(k, p->builtin->function.binary(car(args), cadr(args)));
+}
+
+void invoke_ternary(procedure_t *p, object_t *args, env_t* env, continuation_t* k) {
+  resume(k, p->builtin->function.ternary(car(args), cadr(args), caddr(args)));
+}
+
+void invoke_four_ary(procedure_t *p, object_t *args, env_t* env, continuation_t* k) {
+  resume(k, p->builtin->function.four_ary(car(args), cadr(args), caddr(args), cadddr(args)));
+}
+
+
+void resume_builtin_invoke(continuation_t *c, object_t *args) {
+  procedure_t* p = c->data->value.procedure;
+
+  invoke_t invoke_list[5] = {invoke_thunk, invoke_unary, invoke_binary, invoke_ternary, invoke_four_ary};
+  ((p->arity == -1) ? invoke_with_list : invoke_list[p->arity])(p, args, c->env, c->k);
+
+}
+
+void invoke_builtin(procedure_t *p, object_t *args, env_t *env, continuation_t *k) {
+
+  __args(args, env, make_continuation(resume_builtin_invoke, make_procedure_object(p), env, k));
+}
+
+void invoke_special(procedure_t *p, object_t *args, env_t *env, continuation_t *k) {
+  p->builtin->function.special(args, env, k);
+}
+
+void invoke_lambda(procedure_t *p, object_t *args, env_t* env, continuation_t* k) {
+  printf("invoke lambda\n");
+}
+
+
+void invoke(object_t *callable, object_t *obj, env_t* env, continuation_t* k) {
+  procedure_t* proc = callable->value.procedure;
+
+  if (callable->type == OBJECT_TYPE_PROCEDURE)
+    proc->builtin->invoke(proc, obj, env, k);
+  else if (callable->type == OBJECT_TYPE_CONTINUATION)
+    resume(callable->value.continuation, obj);
+  else if (callable->type == OBJECT_TYPE_ERROR)
+    resume(k, callable);
+}
+
+void resume_procedure(continuation_t *c, object_t* obj) {
+  invoke(c->data, obj, c->env, c->k);
+}
+
+continuation_t *make_procedure_continuation(procedure_t *p) {
+  return make_continuation(resume_builtin_invoke, make_procedure_object(p), NULL, NULL);
 }
 
 void resume(continuation_t *k, object_t *object) {
-  if (k == NULL) {
-    printf("exiting with null continuation\n");
-    exit(0);
+  if (k != NULL) {
+    k->resume(k, object);
   }
-
-  k->resume(k, object);
 }
+
+
+procedure_t **builtin_procedure_list(int *count) {
+  *count = 12;
+  procedure_t **list = malloc(*count * sizeof(procedure_t *));
+
+  list[0] = make_special_procedure("eval", (c_function_t) eval);
+  list[1] = make_special_procedure("define", (c_function_t) __define);
+  list[2] = make_special_procedure("lambda", (c_function_t) __lambda);
+  list[3] = make_special_procedure("ccc", (c_function_t) __ccc);
+  list[4] = make_special_procedure("if", (c_function_t) __if);
+  list[5] = make_special_procedure("quote", (c_function_t) __quote);
+  list[6] = make_special_procedure("begin", (c_function_t) __begin);
+  list[7] = make_builtin_procedure("print", (c_function_t) print, -1);
+  list[8] = make_builtin_procedure("car", (c_function_t) car, 1);
+  list[9] = make_builtin_procedure("cdr", (c_function_t) cdr, 1);
+  list[10] = make_builtin_procedure("cons", (c_function_t) cons, 2);
+  list[11] = make_builtin_procedure("print", (c_function_t) read, 0);
+  
+  return list;
+}
+
+void register_builtins(env_t* env) {
+
+  int count, i;
+  procedure_t **procs = builtin_procedure_list(&count);
+  object_t *symbol;
+
+  for (i=0; i<count; i++)
+    {
+      symbol = make_symbol_object(procs[i]->builtin->name);
+      env_add_symbol(env, symbol, make_procedure_object(procs[i]));
+    }
+}
+
 
 int main(int argc, char **argv) {
 
   env_t *genv = malloc(sizeof(env_t));
   genv->parent = NULL; 
-  //  procedure_* c_print = make_builtin_procedure("print", (c_function_t) print);
+  //  procedure_* c_print = 
   //  continuation_t* c_eval = make_primitive_continuation("eval", 0, 0, eval, c_print);
   //  continuation_t* c_read = make_primitive_continuation("read", 0, 0, read, c_eval);
   //  c_print->k = c_read;
 
-  procedure_t * c_print = make_builtin_procedure("print", (c_function_t) print);
-  continuation_t *print_continuation = make_builtin_continuation(c_print);
+  procedure_t * c_print = make_builtin_procedure("print", (c_function_t) print, -1);
+
+  continuation_t *print_continuation = make_procedure_continuation(c_print);
+
+  register_builtins(genv);
   
   while (1) {
     eval(read(), genv, print_continuation);

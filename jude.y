@@ -28,7 +28,7 @@ atom: SYMBOL { $$ = $1; }
 list: OPEN rest { $$ = $2; }
 ;
 
-rest: datum CLOSE         { $$ = cons($1, (struct object *) NULL); }
+rest: datum CLOSE         { $$ = cons($1, (object_t *) NULL); }
   | datum DOT datum CLOSE { $$ = cons($1, $3); }
   | datum rest            { $$ = cons($1, $2); }
 ;
