@@ -51,12 +51,9 @@ typedef  union {
   
 } c_function_t;
 
-typedef void (*invoke_t)(procedure_t *, object_t *, env_t *, continuation_t *);
-
 struct builtin {
   char *name;
   c_function_t function;
-  invoke_t invoke;
 };
 
 struct lambda {
@@ -65,20 +62,13 @@ struct lambda {
   object_t *code;
 };
 
-
-#define PROCEDURE_TYPE_BUILTIN 1
-#define PROCEDURE_TYPE_LAMBDA 2
-#define PROCEDURE_TYPE_SPECIAL 3
-
-
-typedef int procedure_type_t;
-
+typedef void (*invoke_t) (object_t*, object_t*, env_t*, continuation_t*);
 
 struct procedure {
-  procedure_type_t type;
   int arity;
   builtin_t *builtin;
   lambda_t *lambda;
+  void (*invoke) (object_t*, object_t*, env_t*, continuation_t*);
 };
 
 typedef int object_type_t;
@@ -89,7 +79,7 @@ typedef int object_type_t;
 #define OBJECT_TYPE_BOOLEAN 4
 #define OBJECT_TYPE_PROCEDURE 5
 #define OBJECT_TYPE_PAIR (object_type_t) 8
-#define OBJECT_TYPE_ERROR 32
+#define OBJECT_TYPE_ERROR 15
 
 
 typedef struct pair {
@@ -110,29 +100,38 @@ struct object {
   } value;
 };
 
+void print_object(object_t *);
+
+procedure_t *make_special_procedure(char *, c_function_t);
+procedure_t *make_builtin_procedure(char *, c_function_t, int);
+
 object_t *make_number_object(int);
 object_t *make_symbol_object(char *);
 object_t *make_boolean_object(int);
 object_t *make_error_object(char *);
 object_t *make_procedure_object(procedure_t *);
 
-
-object_t* cons(object_t *, object_t *);
+typedef void (*resume_t) (continuation_t *, object_t* );
 
 void resume(continuation_t *, object_t * object);
+void resume_builtin_invoke(continuation_t *, object_t * object);
+
 void eval(object_t *, env_t *env, continuation_t *);
 
+
+void invoke_with_list(object_t *, object_t *, env_t *env, continuation_t* k);
+void invoke_thunk(object_t *, object_t *, env_t *env, continuation_t* k);
+void invoke_unary(object_t *, object_t *, env_t *env, continuation_t* k);
+void invoke_binary(object_t *, object_t *, env_t *env, continuation_t* k);
+void invoke_ternary(object_t *, object_t *, env_t *env, continuation_t* k);
+void invoke_four_ary(object_t *, object_t *, env_t *env, continuation_t* k);
+
 void invoke(object_t *, object_t *, env_t *env, continuation_t* k);
-void invoke_thunk(procedure_t *, object_t *, env_t *env, continuation_t* k);
-void invoke_unary(procedure_t *, object_t *, env_t *env, continuation_t* k);
-void invoke_binary(procedure_t *, object_t *, env_t *env, continuation_t* k);
-void invoke_ternary(procedure_t *, object_t *, env_t *env, continuation_t* k);
-void invoke_four_ary(procedure_t *, object_t *, env_t *env, continuation_t* k);
+void invoke_lambda(object_t *, object_t *, env_t *env, continuation_t* k);
+void invoke_builtin(object_t *, object_t *, env_t *env, continuation_t* k);
+void invoke_special(object_t *, object_t *, env_t *env, continuation_t* k);
 
-void invoke_builtin(procedure_t *, object_t *, env_t *env, continuation_t* k);
-void invoke_special(procedure_t *, object_t *, env_t *env, continuation_t* k);
-void invoke_with_list(procedure_t *, object_t *, env_t *env, continuation_t* k);
-
+object_t* cons(object_t *, object_t *);
 object_t *car(object_t *);
 object_t *cdr(object_t *);
 object_t *cadr(object_t *);
@@ -142,5 +141,21 @@ object_t *cdddr(object_t *);
 object_t *cadddr(object_t *);
 object_t *cddddr(object_t *);
 
+object_t *print(object_t *);
+object_t *__read();
+object_t *__plus(object_t *);
+object_t *__minus(object_t *);
+object_t *__times(object_t *);
+object_t *__divide(object_t *);
+
+object_t *__length(object_t *);
+
+void __quote (object_t *, env_t *, continuation_t *);
+void __lambda (object_t *, env_t *, continuation_t *);
+void __begin (object_t *, env_t *, continuation_t *);
+void __ccc (object_t *, env_t *, continuation_t *);
+void __if (object_t *, env_t *, continuation_t *);
+void __define (object_t *, env_t *, continuation_t *);
+void __eval_sequence (object_t *, env_t *, continuation_t *);
 
 #endif
