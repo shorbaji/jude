@@ -5,6 +5,15 @@
 #include "jude.tab.h"
 #include "uthash.h"
 
+// TODO
+// - eq
+// - tail recursion
+// - unquote, quasiquote, comma_at
+// - syntax for ' ` , ,@
+// - macros
+// - a garbage collector
+// - libraries
+
 // environment
 
 void env_add_symbol(env_t * env, object_t* symbol, object_t* value)
@@ -380,11 +389,18 @@ object_t *print(object_t *object) {
   return NULL;
 }
 
-object_t *__read() {
+object_t __print(object_t *object, env_t* env, continuation_t* k) {
+  print_object(object);
+  printf("\n");
+
+  resume(k, NULL);
+}
+
+object_t *__read(object_t *object, env_t* env, continuation_t* k) {
   printf("$ ");
   int n = yyparse();
 
-  return yylval;
+  resume(k, yylval);
 }
 
 object_t *cons(object_t *a, object_t *b) {
@@ -557,14 +573,33 @@ void eval(object_t *e, env_t *env, continuation_t *k) {
 
 #define MAKE_INVOKE(fn, body) void fn(object_t *c, object_t *args, env_t* env, continuation_t* k) { body }
 
-MAKE_INVOKE(invoke_thunk, resume(k, c->value.procedure->builtin->function.thunk());)
-MAKE_INVOKE(invoke_with_list, resume(k, c->value.procedure->builtin->function.unary(args));)
-MAKE_INVOKE(invoke_unary, resume(k, c->value.procedure->builtin->function.unary(car(args)));)
-MAKE_INVOKE(invoke_binary, resume(k, c->value.procedure->builtin->function.binary(car(args),cadr(args)));)
-MAKE_INVOKE(invoke_ternary, resume(k, c->value.procedure->builtin->function.ternary(car(args), cadr(args), caddr(args)));)
-MAKE_INVOKE(invoke_four_ary, resume(k, c->value.procedure->builtin->function.four_ary(car(args), cadr(args), caddr(args), cadddr(args)));)
 
-invoke_t invoke_list[5] = {invoke_thunk, invoke_unary, invoke_binary, invoke_ternary, invoke_four_ary};
+MAKE_INVOKE(invoke_thunk,
+	    resume(k, c->value.procedure->builtin->function.thunk());)
+MAKE_INVOKE(invoke_with_list,
+	    resume(k, c->value.procedure->builtin->function.unary(args));)
+MAKE_INVOKE(invoke_unary,
+	    resume(k, c->value.procedure->builtin->function.unary(car(args)));)
+
+MAKE_INVOKE(invoke_binary,
+	    resume(k, c->value.procedure->builtin->function.binary(car(args),
+								   cadr(args)));)
+
+MAKE_INVOKE(invoke_ternary,
+	    resume(k, c->value.procedure->builtin->function.ternary(car(args),
+								    cadr(args),
+								    caddr(args)));)
+
+MAKE_INVOKE(invoke_four_ary,
+	    resume(k, c->value.procedure->builtin->function.four_ary(car(args),
+								     cadr(args),
+								     caddr(args),
+								     cadddr(args)));)
+invoke_t invoke_list[5] = {invoke_thunk,
+			   invoke_unary,
+			   invoke_binary,
+			   invoke_ternary,
+			   invoke_four_ary};
 
 void invoke_special(object_t* call, object_t* args, env_t* env, continuation_t* k)
 {
@@ -618,26 +653,38 @@ void resume(continuation_t* c, object_t* obj)
 {
   if (c == NULL)
     {
-      //      printf("null continuation\n");
-      //      exit(0);
+      printf("null continuation\n");
+      exit(0);
     }
   else c->resume(c, obj);
 }
 
 // main
 
-int main(int argc, char **argv) {
 
+void resume_read(continuation_t*, object_t*);
+void resume_print(continuation_t*, object_t*);
+void resume_eval(continuation_t*, object_t*);
+
+void resume_print(continuation_t* c, object_t* value) {
+  __print(value, c->env, make_continuation(resume_read, NULL, c->env, c->k));
+}
+
+void resume_eval(continuation_t* c, object_t* datum) {
+  eval(datum, c->env, make_continuation(resume_print, NULL, c->env, c->k));
+}
+  
+void resume_read(continuation_t* c, object_t* object) {
+  __read(object, c->env, make_continuation(resume_eval, NULL, c->env, c->k));
+}
+
+int main(int argc, char **argv) {
   env_t *genv = malloc(sizeof(env_t));
+
   genv->parent = NULL; 
 
   register_builtins(genv);
   
-  while (1) {
-    eval(cons(make_symbol_object("print"),
-	      cons(__read(),
-		   NULL)),
-	 genv,
-	 NULL);
-  }
+  resume(make_continuation(resume_read, NULL, genv, NULL), NULL);
+
 }
