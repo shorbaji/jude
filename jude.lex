@@ -22,10 +22,10 @@ false              #f
 %%
 
 [ \t\n]+     {}
-{number}     { yylval = make_number_object(atoi(yytext)); return NUMBER; }
+{number}     { yylval = make_num_obj(atoi(yytext)); return NUMBER; }
 \(           { return OPEN; }
 \)           { return CLOSE; }
-{id}         { yylval = make_symbol_object(yytext); return SYMBOL; }
-{true}       { yylval = make_boolean_object(1); return BOOLEAN; }
-{false}      { yylval = make_boolean_object(0); return BOOLEAN; }
+{id}         { yylval = make_sym_obj(yytext); return SYMBOL; }
+{true}       { yylval = make_bool_obj(1); return BOOLEAN; }
+{false}      { yylval = make_bool_obj(0); return BOOLEAN; }
 {dot}        { return DOT; }

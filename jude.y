@@ -3,7 +3,7 @@
   #include "jude.h"
 %}
 
-%define api.value.type {  struct object * }
+%define api.value.type {  obj_t * }
 
 %token SYMBOL NUMBER OPEN CLOSE BOOLEAN DOT DEFINE
 
@@ -28,7 +28,7 @@ atom: SYMBOL { $$ = $1; }
 list: OPEN rest { $$ = $2; }
 ;
 
-rest: datum CLOSE         { $$ = cons($1, (object_t *) NULL); }
+rest: datum CLOSE         { $$ = cons($1, (obj_t *) NULL); }
   | datum DOT datum CLOSE { $$ = cons($1, $3); }
   | datum rest            { $$ = cons($1, $2); }
 ;

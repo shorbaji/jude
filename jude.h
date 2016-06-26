@@ -1,161 +1,93 @@
-#ifndef JUDE_H
-#define JUDE_H
+#define CONT_STACK_SIZE 1024
 
-#include "uthash.h"
+typedef int num_t;
+typedef char* sym_t;
+typedef char* str_t;
+typedef int bool_t;
+typedef struct vector vector_t;
 
-struct object;
-
-struct hash_entry {
-  char* key;
-  struct object* value;
-  UT_hash_handle hh;
-};
-
-struct env {
-  struct hash_entry* hash;
-  struct env* parent;
-};
-
-typedef struct continuation continuation_t;
-typedef struct procedure procedure_t;
-typedef struct lambda lambda_t;
-typedef struct builtin builtin_t;
-typedef struct object object_t;
+typedef struct obj obj_t;
+typedef struct pair pair_t;
+typedef struct cont cont_t;
 typedef struct env env_t;
+typedef struct proc proc_t;
 
+typedef struct lambda lambda_t;
 
-typedef void (*resume_t) (continuation_t*, object_t*);
+// obj
 
-struct continuation {
-  resume_t resume;
-  object_t *data;
-  env_t *env;
-  continuation_t *k;
+typedef int obj_type_t;
+
+#define OBJ_T_NUM (obj_type_t) 1
+#define OBJ_T_BOOL (obj_type_t) 2
+#define OBJ_T_SYM (obj_type_t) 7
+#define OBJ_T_PAIR (obj_type_t) 8
+
+struct obj {
+  obj_type_t type;
+  union {
+    num_t num;
+    sym_t sym;
+    bool_t bool;
+    str_t *str;
+    pair_t *pair;
+    cont_t *cont;
+    proc_t *proc;
+    env_t *env;
+  };
 };
 
-typedef object_t * (*thunk_t)();
-typedef object_t * (*unary_t)(object_t *);
-typedef object_t * (*binary_t) (object_t *, object_t *);
-typedef object_t * (*ternary_t) (object_t *, object_t *, object_t *);
-typedef object_t * (*four_ary_t) (object_t *, object_t *, object_t *, object_t *);
+struct pair {
+  obj_t *car;
+  obj_t *cdr;
+};
 
-typedef void (*special_t) (object_t *, env_t *, continuation_t *);
+typedef void * cont_type_t;
 
-typedef  union {
-  thunk_t thunk;
-  unary_t unary;
-  binary_t binary;
-  ternary_t ternary;
-  four_ary_t four_ary;
-  special_t special;
-  
-} c_function_t;
-
-struct builtin {
-  char *name;
-  c_function_t function;
+struct cont {
+  cont_type_t type;
+  obj_t* data;
+  env_t* env;
+  int k;
 };
 
 struct lambda {
-  env_t * env;
-  object_t *vars;
-  object_t *code;
+  obj_t *vars;
+  obj_t *code;
+  env_t *env;
 };
+      
 
-typedef void (*invoke_t) (object_t*, object_t*, env_t*, continuation_t*);
+typedef int proc_type_t;
+typedef char* proc_name_t;
 
-struct procedure {
-  int arity;
-  builtin_t *builtin;
-  lambda_t *lambda;
-  void (*invoke) (object_t*, object_t*, env_t*, continuation_t*);
-};
-
-typedef int object_type_t;
-
-#define OBJECT_TYPE_NUMBER (object_type_t) 1
-#define OBJECT_TYPE_CONTINUATION (object_type_t) 2
-#define OBJECT_TYPE_SYMBOL 3
-#define OBJECT_TYPE_BOOLEAN 4
-#define OBJECT_TYPE_PROCEDURE 5
-#define OBJECT_TYPE_PAIR (object_type_t) 8
-#define OBJECT_TYPE_ERROR 15
-
-
-typedef struct pair {
-  object_t *car;
-  object_t *cdr;
-} pair_t;
+typedef obj_t *(*thunk_t) ();
+typedef obj_t *(*unary_t) (obj_t *);
+typedef obj_t *(*multary_t) (obj_t *);
+typedef obj_t *(*binary_t) (obj_t *, obj_t *);
+typedef obj_t *(*ternary_t) (obj_t *, obj_t *, obj_t *);
+typedef obj_t *(*quadnary_t) (obj_t *, obj_t* , obj_t*, obj_t*);
   
-struct object {
-  object_type_t type;
-  union  {
-    int number;
-    int boolean;
-    char* symbol;
-    continuation_t *continuation;
-    procedure_t *procedure;
-    pair_t pair;
-    char* error;
-  } value;
+struct proc {
+  proc_type_t type;
+  proc_name_t name;
+  int arity;
+  union {
+    thunk_t thunk;
+    multary_t multary;
+    unary_t unary;
+    binary_t binary;
+    ternary_t ternary;
+    quadnary_t quadnary;
+    lambda_t *lambda;
+  } ;
 };
 
-void print_object(object_t *);
 
-procedure_t *make_special_procedure(char *, c_function_t);
-procedure_t *make_builtin_procedure(char *, c_function_t, int);
-
-object_t *make_number_object(int);
-object_t *make_symbol_object(char *);
-object_t *make_boolean_object(int);
-object_t *make_error_object(char *);
-object_t *make_procedure_object(procedure_t *);
-
-typedef void (*resume_t) (continuation_t *, object_t* );
-
-void resume(continuation_t *, object_t * object);
-void resume_builtin_invoke(continuation_t *, object_t * object);
-
-void eval(object_t *, env_t *env, continuation_t *);
+obj_t* make_num_obj(num_t);
+obj_t* make_sym_obj(sym_t);
+obj_t* make_bool_obj(bool_t);
 
 
-void invoke_with_list(object_t *, object_t *, env_t *env, continuation_t* k);
-void invoke_thunk(object_t *, object_t *, env_t *env, continuation_t* k);
-void invoke_unary(object_t *, object_t *, env_t *env, continuation_t* k);
-void invoke_binary(object_t *, object_t *, env_t *env, continuation_t* k);
-void invoke_ternary(object_t *, object_t *, env_t *env, continuation_t* k);
-void invoke_four_ary(object_t *, object_t *, env_t *env, continuation_t* k);
 
-void invoke(object_t *, object_t *, env_t *env, continuation_t* k);
-void invoke_lambda(object_t *, object_t *, env_t *env, continuation_t* k);
-void invoke_builtin(object_t *, object_t *, env_t *env, continuation_t* k);
-void invoke_special(object_t *, object_t *, env_t *env, continuation_t* k);
-
-object_t* cons(object_t *, object_t *);
-object_t *car(object_t *);
-object_t *cdr(object_t *);
-object_t *cadr(object_t *);
-object_t *cddr(object_t *);
-object_t *caddr(object_t *);
-object_t *cdddr(object_t *);
-object_t *cadddr(object_t *);
-object_t *cddddr(object_t *);
-
-object_t *print(object_t *);
-object_t *__read();
-object_t *__plus(object_t *);
-object_t *__minus(object_t *);
-object_t *__times(object_t *);
-object_t *__divide(object_t *);
-
-object_t *__length(object_t *);
-
-void __quote (object_t *, env_t *, continuation_t *);
-void __lambda (object_t *, env_t *, continuation_t *);
-void __begin (object_t *, env_t *, continuation_t *);
-void __ccc (object_t *, env_t *, continuation_t *);
-void __if (object_t *, env_t *, continuation_t *);
-void __define (object_t *, env_t *, continuation_t *);
-void __eval_sequence (object_t *, env_t *, continuation_t *);
-
-#endif
+obj_t *cons(obj_t*, obj_t*);
