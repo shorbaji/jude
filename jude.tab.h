@@ -51,7 +51,10 @@ extern int yydebug;
     CLOSE = 261,
     BOOLEAN = 262,
     DOT = 263,
-    DEFINE = 264
+    DEFINE = 264,
+    LAMBDA = 265,
+    IF = 266,
+    QUOTE = 267
   };
 #endif
 
